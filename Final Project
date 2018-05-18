@@ -1,0 +1,345 @@
+int canvasWidth = 640;
+int canvasHeight = 360;
+float noiseScale = 0.07;
+float waveMovementSpeed = 1.75;
+
+int waterStrokeWeight = 6;
+int waterStride = 10;
+
+int sunHeight = 150;
+int sunSize = 200;
+
+Waves waves;
+
+tree[] trees = new tree[256];
+
+int count;
+
+void setup() {
+  size(640, 360);
+  background(100);
+  noStroke();
+  colorMode(RGB);
+
+  // fill the background sky
+  fill(50, 90, 100);
+  rect(0, 0, canvasWidth, canvasHeight);
+
+  // sky burst
+  int fromSky = color(69, 103, 108);
+  int toSky = color(240, 220, 180);
+
+  for (int i = 10; i > 0; i--) {
+    fill(lerpColor(fromSky, toSky, 1 - ((float) i / 10)));
+    ellipse(canvasWidth / 2, sunHeight, 25 * i + (canvasWidth / 2), 25 * i + canvasWidth / 2);
+  }
+
+  // horizon fades (the things on the two sides)
+  color from = color(210, 140, 100, 30);
+  color to = color(85, 40, 50, 30);
+
+  for (int i = 10; i > 0; i--) {
+    fill(lerpColor(from, to, 1 - i / 10));
+    ellipse(-(10 - i) * 5, sunHeight, 25 * i + 180, 10 * i + 20);
+    ellipse(width + (10 - i) * 5, sunHeight, 25 * i + 180, 10 * i + 20);
+  }
+
+  // the actual sun
+  for (int i = sunSize; i > 0; i -= 10) {
+    fill(255, 255 - i * 0.1, 250 - i * 0.5);
+    ellipse(canvasWidth / 2, sunHeight, i, i);
+  }
+
+  // initialize the waves
+  waves = new Waves(sunHeight, waterStrokeWeight, waterStride, noiseScale, waveMovementSpeed);
+  trees[0] = new tree(new PVector(width/2, height), new PVector(0, -height));
+  count = trees[0].treeSize;
+}
+
+void draw() {
+  waves.draw();
+
+  trees[0].swing();
+  fill(mouseX, mouseY, 143, 107);
+  stroke(210, 180, 140, 200);
+  int tempIndex;
+  for (int i = 1; i < count; i ++)
+  {
+    strokeWeight(trees[0].twig[(int)trees[0].map[i].x].thickness[(int)trees[0].map[i].y]);
+    line(trees[0].twig[(int)trees[0].map[i].x].location[(int)trees[0].map[i].y - 1].x, trees[0].twig[(int)trees[0].map[i].x].location[(int)trees[0].map[i].y - 1].y, 
+      trees[0].twig[(int)trees[0].map[i].x].location[(int)trees[0].map[i].y].x, trees[0].twig[(int)trees[0].map[i].x].location[(int)trees[0].map[i].y].y);
+  }
+
+  noStroke(); 
+  for (int i = 0; i < trees[0].twig.length; i++)
+  {
+    int num = trees[0].twig[i].location.length - 1;
+    ellipse(trees[0].twig[i].location[num].x, trees[0].twig[i].location[num].y, 12, 12);
+  }
+}
+
+class Waves {
+
+  int startingHeight = 0;
+  int strokeWeight = 0;
+  int stride = 0;
+  float noiseScale = 0.0;
+  float movementSpeed = 0;
+
+  public Waves(  int startingHeight, 
+    int strokeWeight, 
+    int waterStride, 
+    float noiseScale, 
+    float movementSpeed) {
+    this.startingHeight = startingHeight;
+    this.strokeWeight = strokeWeight;
+    this.stride = waterStride;
+    this.noiseScale = noiseScale;
+    this.movementSpeed = movementSpeed;
+  }
+
+  public void draw() {
+    int lineToggle = 0;
+    int yPos = this.startingHeight + this.strokeWeight;
+    for (; yPos < height + this.strokeWeight; yPos += this.stride) {
+      for (int xPos = lineToggle; xPos <= width - lineToggle; xPos += this.stride) {
+        float yPosMap01 = map(yPos, this.startingHeight, height, 0, 1);
+        float noiseXInput = this.noiseScale * ((xPos - (1 - yPosMap01) * width / 2) + this.stride * 0.5) / (yPosMap01 * 10 + 1);
+        float noiseYInput = this.noiseScale * (yPos * map(yPos, sunHeight, height, 1.5, 1) - frameCount / 3) * this.movementSpeed;
+        float noiseZInput = frameCount / 100 * this.movementSpeed;
+
+        float noiseVal = noise(noiseXInput, noiseYInput, noiseZInput);
+        color c = lerpColor(color(0, 12, 51), color(100, 110, 150), noiseVal);
+
+        int reflectionHalfWidth = 200;
+
+        float edgeBlendModifier = constrain((2 - (abs(width / 2 - xPos + lineToggle) / (reflectionHalfWidth * (yPosMap01 + 0.6))) * 2), 0, 1);
+        float noiseValIncreasedContrast = constrain(map(noiseVal, 0.1, 0.6, 0, 1), 0, 1);
+        c = lerpColor(c, color(240, 205, mouseX), constrain(noiseValIncreasedContrast * 4 - 3, 0, edgeBlendModifier));
+        c = lerpColor(c, color(240, 240, mouseY), constrain((noiseVal * 10 - 6), 0, edgeBlendModifier));
+        c = lerpColor(c, color(240, 240, 175), constrain((noiseVal * 10 - 7), 0, 1));
+
+        strokeWeight(this.strokeWeight + 10);
+        stroke(c);
+        line(xPos, yPos, xPos + this.stride, yPos);
+      }
+      lineToggle = lineToggle == 0 ? -this.stride / 2 : 0;
+    }
+  }
+}
+
+class branch 
+{
+  PVector[] location;
+  float[] thickness;
+  int[][] baseIndex = new int[2][];
+  //  float[] baseDtheta;
+  boolean isCandidate = false;
+  float[] dTheta;
+
+  branch(PVector loc, float thic, int id, int branchIndex)
+  {
+    location = new PVector[1];
+    thickness = new float[1];
+    location[0] = new PVector(loc.x, loc.y);
+    thickness[0] = thic;
+
+    baseIndex[0] = new int[1];
+    baseIndex[1] = new int[1];
+    baseIndex[0][0] = id;
+    baseIndex[1][0] = branchIndex;
+  }
+  void branchRotate(int index, float theta, PVector reference)
+  {
+    location[index].sub(reference);
+    rotate2D(location[index], theta);
+    location[index].add(reference);
+  }
+
+  void rotate2D(PVector v, float theta)
+  {
+    float xTemp = v.x;
+    v.x = v.x * cos(theta) - v.y * sin(theta);
+    v.y = xTemp * sin(theta) + v.y * cos(theta);
+  }
+}
+
+class frontier 
+{
+  PVector location;
+  PVector velocity;
+  float thickness;
+  boolean finished;
+
+
+  frontier(PVector startPoint, PVector direction)
+  {
+    location = new PVector(startPoint.x, startPoint.y);
+    velocity = new PVector(direction.x, direction.y);
+    thickness = random(10, 20);
+    finished = false;
+  }
+
+  frontier(frontier parent) 
+  {
+    location = parent.location.get();
+    velocity = parent.velocity.get();
+    thickness = parent.thickness;
+    parent.thickness = thickness;
+    finished = parent.finished;
+  }
+
+  void update(float factor) 
+  {
+    if (  location.x > -10 
+      & location.y > -10
+      & location.x < width + 10
+      & location.y < height + 10 
+      & thickness > factor)  
+    {
+      velocity.normalize();
+      PVector uncertain = new PVector(random(-1, 1), random(-1, 1));
+      uncertain.normalize();
+      uncertain.mult(0.2);
+      velocity.mult(0.8);
+      velocity.add(uncertain);
+      velocity.mult(random(8, 15));
+      location.add(velocity);
+    } else
+    {
+      finished = true;
+    }
+  } // void update()
+}
+
+class tree 
+{
+  PVector[] map;
+  branch[] twig;
+  int treeSize;
+  float BranchLengthFactor = 0.3;
+  float BranchLocationFactor = 0.3;
+
+  float dt = 0.025;
+  float time = 0;
+  float[] dtheta;
+
+  int candNum = 3;
+  int[] candidateIndex = new int[candNum];
+  float[] amplitude = new float[candNum];
+  float[] phaseFactor = new float[candNum];
+  float freq;
+  float period;
+
+  tree(PVector startPoint, PVector direction)
+  { 
+    int id = 0;
+    boolean growth = false;
+
+    frontier[] fr = new frontier[1];
+    fr[id] = new frontier(startPoint, direction);
+
+    twig = new branch[1];    
+    twig[id] = new branch(fr[id].location, fr[id].thickness, id, 0);
+
+    map = new PVector[1];
+    map[0] = new PVector(id, twig[id].location.length - 1);
+
+    while (!growth)
+    {
+      int growthSum = 0;
+      for (id = 0; id < fr.length; id++)
+      {
+        fr[id].update(BranchLocationFactor);
+        if (!fr[id].finished)
+        {
+          twig[id].location = (PVector[]) append(twig[id].location, new PVector(fr[id].location.x, fr[id].location.y)); 
+          twig[id].thickness = (float[]) append(twig[id].thickness, fr[id].thickness);
+          map = (PVector[]) append(map, new PVector(id, twig[id].location.length - 1));
+
+          if (random(0, 1) < BranchLengthFactor)  // control length of one branch  
+          { 
+
+            fr[id].thickness *= 0.65;
+            twig[id].thickness[twig[id].thickness.length - 1] = fr[id].thickness;
+            if ( fr[id].thickness > BranchLocationFactor)  // control the number of the locations on all branches, i.e., treeSize.
+            {
+              fr = (frontier[]) append(fr, new frontier(fr[id]));           
+              twig = (branch[]) append(twig, new branch(fr[id].location, fr[id].thickness, id, twig[id].location.length - 1));
+              int _id = id;
+              if (_id != 0)  for (int _i = 0; _i < 2; _i++)  twig[twig.length - 1].baseIndex[_i] = concat(twig[twig.length - 1].baseIndex[_i], twig[_id].baseIndex[_i]);
+            }
+          } // if (random(0, 1) < 0.2)
+        } else  growthSum += 1;
+      }
+      if (growthSum == fr.length) 
+      {
+        dtheta = new float[twig.length];
+        treeSize = map.length;
+        growth = true;
+      }
+    } // while(!growth)
+
+    ArrayList<Float> _candList = new ArrayList<Float>();
+    float[] _candfloat = new float[twig.length];
+    for (int i = 0; i < twig.length; i++)
+    {
+      _candfloat[i] = (float)twig[i].location.length;
+      _candList.add(_candfloat[i]);
+    }
+    candidateIndex[0] = 0;
+    twig[0].isCandidate = true;
+    twig[0].dTheta = new float[twig[0].location.length];
+    _candfloat[0] = -1.0;
+    _candList.set(0, -1.0);
+    for (int i = 1; i < candNum; i++) 
+    {
+      float _temp = max(_candfloat);
+      candidateIndex[i] = _candList.indexOf(_temp);
+      twig[candidateIndex[i]].isCandidate = true;
+      twig[candidateIndex[i]].dTheta = new float[twig[candidateIndex[i]].location.length];
+      _candfloat[candidateIndex[i]] = -1.0;
+      _candList.set(candidateIndex[i], -1.0);
+    }
+    //    println(candidateIndex);
+
+    amplitude[0] = random(0.006, 0.012);
+    phaseFactor[0] = random(0.6, 1.2);
+    freq = random(0.5, 0.8);
+    period = 1 / freq;
+    for (int i = 1; i < candNum; i++)
+    {
+      amplitude[i] = amplitude[i-1] * random(0.9, 1.4);
+      phaseFactor[i] = phaseFactor[i-1] * random(0.9, 1.4);
+    }
+  }
+
+  void swing()
+  {
+    for (int i = 0; i < candNum; i++)
+    {
+      int _num = twig[candidateIndex[i]].location.length;
+      for (int j = 0; j < _num; j++)  twig[candidateIndex[i]].dTheta[j] = amplitude[i] * dt * TWO_PI * freq * cos(TWO_PI * freq * time - phaseFactor[i] * PI * (float)j / (float)_num);
+    }
+
+    for (int id = 0; id < twig.length; id++)
+    {
+      if (twig[id].isCandidate)  for (int _id = 1; _id < twig[id].location.length; _id++)  twig[id].branchRotate(_id, twig[id].dTheta[_id], twig[id].location[0]);
+
+      for (int j = 0; j < twig[id].baseIndex[0].length; j++)
+      {
+        if (!twig[twig[id].baseIndex[0][j]].isCandidate | id == 0) continue;
+        else
+        {
+          for (int k = (id == 0) ? 1 : 0; k < twig[id].location.length; k++)
+          {
+            twig[id].branchRotate(k, twig[twig[id].baseIndex[0][j]].dTheta[twig[id].baseIndex[1][j]], twig[twig[id].baseIndex[0][j]].location[0]);
+          }
+        }
+      }
+    } // for(int id = 0; id < twig.length; id++)
+
+    time += dt;
+    if (time >= period) time -= period;
+  }
+}
